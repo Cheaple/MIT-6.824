@@ -125,9 +125,12 @@ func (c *Coordinator) manageTasks() {
 			// fmt.Printf("map task %v done\n", i)
 			c.mapStatus[i] = Finished
 		case i := <- c.mapTimeoutChan:
-			// fmt.Printf("map task %v timeout\n", i)
-			c.mapTaskChan <- i
-			c.mapStatus[i] = NotStart
+			if c.mapStatus[i] == Started {
+				// fmt.Printf("map task %v timeout\n", i)
+				c.mapTaskChan <- i
+				c.mapStatus[i] = NotStart
+			}
+
 		default:
 		}	
 		func() {
@@ -163,8 +166,11 @@ func (c *Coordinator) manageTasks() {
 		case i := <- c.reduceDoneChan:
 			c.reduceStatus[i] = Finished
 		case i := <- c.reduceTimeoutChan:
-			c.reduceTaskChan <- i
-			c.reduceStatus[i] = NotStart
+			if c.reduceStatus[i] == Started {
+				// fmt.Printf("reduce task %v timeout\n", i)
+				c.reduceTaskChan <- i
+				c.reduceStatus[i] = NotStart
+			}
 		default:
 		}	
 		func() {
@@ -199,7 +205,7 @@ func (c *Coordinator) taskTimer(taskType int, idx int) {
 			return
 		default:
 		}
-		time.Sleep(time.Second)
+		// time.Sleep(time.Second)
 	}
 }
 
@@ -212,7 +218,10 @@ func (c *Coordinator) Done() bool {
 
 	// Your code here.
 	ret = c.ifReduceDone
-
+	if ret == true {
+		time.Sleep(time.Second * 10)  // in case that some workers are still calling master
+	}
+	
 	return ret
 }
 
@@ -227,12 +236,12 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// Your code here.
 	c.mapTaskChan = make(chan int, 10)
 	c.reduceTaskChan = make(chan int, nReduce)
-	c.mapDoneChan = make(chan int, 5)
+	c.mapDoneChan = make(chan int, 2)
 	c.mapTimeoutChan = make(chan int, 2)
-	c.mapStartChan = make(chan int, 5)
-	c.reduceStartChan = make(chan int, 5)
+	c.mapStartChan = make(chan int, 2)
+	c.reduceStartChan = make(chan int, 2)
 	c.reduceTimeoutChan = make(chan int, 2)
-	c.reduceDoneChan = make(chan int, 5)
+	c.reduceDoneChan = make(chan int, 2)
 
 	c.mapStatus = make([]int, len(files))
 	c.reduceStatus = make([]int, nReduce)

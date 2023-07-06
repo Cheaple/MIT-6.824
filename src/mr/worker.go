@@ -57,6 +57,8 @@ func Worker(mapf func(string, string) []KeyValue,
 			doReduce(&reply, reducef)
 		} else if reply.TaskType == FinishTask {
 			time.Sleep(time.Second)
+		} else {
+			break
 		}
 	}
 	// uncomment to send the Example RPC to the coordinator.
