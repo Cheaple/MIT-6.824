@@ -24,6 +24,34 @@ type ExampleReply struct {
 
 // Add your RPC definitions here.
 
+type MyArgs struct {
+	MsgType int
+	MsgInt int
+	MsgStr string
+}
+
+type MyReply struct {
+	TaskType int
+	Idx int
+	NReduce int
+	FileList []string
+}
+
+const (
+	MsgTask = iota
+	MsgMapOutput
+	MsgMapDone
+	MsgMapFailed
+	MsgReduceDone
+	MsgReduceFailed
+)
+
+const (
+	MapTask = iota
+	ReduceTask
+	FinishTask
+)
+
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
