@@ -96,6 +96,7 @@ type Raft struct {
 
 	// Others
 	applyCh				chan ApplyMsg
+	applierCh			chan int
 	electionTimer		*time.Timer
 	heartbeatTimer		*time.Timer
 	votesGranted		int
@@ -301,18 +302,20 @@ func (rf *Raft) tryCommit(logIndex int) {
 	if rf.logs[logIndex].Term != rf.currentTerm {
 		return  // according to Figure 2.4.4.4
 	}
-	cnt := 0
+	cnt := 0  // count the number of this log entry' replications on all servers
 	for _, matchIdx := range rf.matchIndex {
 		if matchIdx >= logIndex {
-			cnt += 1
+			cnt += 1 
 		}
 	}
 	log.Printf("    log %d has been replicated to %d servers.", logIndex, cnt)
 	if cnt > len(rf.peers) / 2 {
 		// if the log entry has been replicated it on a majority of the servers
-		rf.commitIndex = logIndex
+		rf.commitIndex = logIndex  // commit it
 		log.Printf("Leader [%d] (term %d) commits log %d", rf.me, rf.currentTerm, logIndex)
 	}
+	rf.applierCh <- 1
+	// Then, newly committed log entries will be applied to the client asynchronously
 }
 
 
@@ -345,14 +348,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// Append new entires
 	if args.Entries != nil {  
 		rf.logs = append(rf.logs[:args.PrevLogIndex + 1], args.Entries...)
-		if args.LeaderCommit > rf.commitIndex {
-			// set commitIndex = min(leaderCommit, index of last new entry (according to Figure 2.2.3.5)
-			if args.LeaderCommit < rf.lastLogIndex() {
-				rf.commitIndex = args.LeaderCommit
-			} else {
-				rf.commitIndex = rf.lastLogIndex()
-			}
+	}
+
+	// Apply newly committed log enties
+	if args.LeaderCommit > rf.commitIndex {
+		// set commitIndex = min(leaderCommit, index of last new entry (according to Figure 2.2.3.5)
+		if args.LeaderCommit < rf.lastLogIndex() {
+			rf.commitIndex = args.LeaderCommit
+		} else {
+			rf.commitIndex = rf.lastLogIndex()
 		}
+		rf.applierCh <- 1
 	}
 
 }
@@ -505,6 +511,29 @@ func (rf *Raft) ticker() {
 	}
 }
 
+// Apply committed log entries to the client asynchronously (the process is slow)
+func (rf *Raft) applier() {
+	for rf.killed() == false {
+		<- rf.applierCh
+		rf.mu.Lock()
+		if rf.lastApplied < rf.commitIndex {
+			for _, entry := range rf.logs[(rf.lastApplied + 1) : (rf.commitIndex + 1)] {
+				rf.applyCh <- ApplyMsg {
+					Command: entry.Command,
+					CommandIndex: entry.Index,
+					CommandValid: true,
+				}
+				log.Printf("Server [%d] (term %d) applied log entry %d", rf.me, rf.currentTerm, entry.Index)
+			}
+
+		}
+		rf.lastApplied = rf.commitIndex
+		rf.mu.Unlock()
+	}
+
+}
+
+
 func (rf *Raft)resetElectionTimer() {
 	elapse := int64(MinElapse) + int64(rand.Intn(MaxElapse - MinElapse))
 	rf.electionTimer.Reset(time.Duration(elapse) * time.Millisecond)
@@ -560,6 +589,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.electionTimer = time.NewTimer(time.Millisecond * 200)
 	rf.resetElectionTimer()
 	rf.heartbeatTimer = time.NewTimer(time.Millisecond * 200)
+	
+	rf.applierCh = make(chan int)
+	go rf.applier()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
