@@ -96,7 +96,7 @@ type Raft struct {
 
 	// Others
 	applyCh				chan ApplyMsg
-	applierCh			chan int
+	applyCond      		*sync.Cond
 	electionTimer		*time.Timer
 	heartbeatTimer		*time.Timer
 	votesGranted		int
@@ -151,7 +151,7 @@ func (rf *Raft) electLeader() {
 	rf.votedFor = rf.me  // rf.me never change, so no need to avoid race
 	rf.votesGranted = 1
 	term := rf.currentTerm  // record currentTerm to avoid race
-	log.Printf("Server [%d] started an election at term %d", rf.me, rf.currentTerm)
+	log.Printf("Candidate [%d] started an election at term %d", rf.me, rf.currentTerm)
 	rf.mu.Unlock()
 
 	// broadcast RequestVote RPC
@@ -160,7 +160,7 @@ func (rf *Raft) electLeader() {
 			continue
 		}
 		go func(server int) {
-			log.Printf("Server [%d] send a vote request to server [%d]", rf.me, server)
+			log.Printf("Candidate [%d] send a vote request to server [%d]", rf.me, server)
 			args := RequestVoteArgs{
 				Term: term,
 				CandidateId: rf.me,
@@ -178,7 +178,7 @@ func (rf *Raft) electLeader() {
 			defer rf.mu.Unlock()
 			if rf.state == CANDIDATE && reply.VoteGranted {
 				// Tally votes, if it were still a Candidate
-				log.Printf("Server [%d] receive a vote from server [%d]", rf.me, server)
+				log.Printf("Candidate [%d] receive a vote from server [%d]", rf.me, server)
 				rf.votesGranted += 1
 				if rf.votesGranted > len(rf.peers) / 2{
 					log.Printf("Server [%d] becomes LEADER at term %d with %d logs", rf.me, rf.currentTerm, len(rf.logs) - 1)
@@ -266,14 +266,23 @@ func (rf *Raft) broadcastAppendEntries(heartbeat bool) {
 //
 func (rf *Raft) sendAppendEntriesRequest(server int, heartbeat bool) {
 	rf.mu.Lock()
+	if rf.state != LEADER {
+		rf.mu.Unlock()  
+		return  // make sure that the sender is still a LEADER
+	}
+	log.Printf("Leader [%d] send a AppendEntries RPC to server [%d]", rf.me, server)
+	if heartbeat {
+		log.Printf("     HEARTBEAT!")
+	}
 	args := &AppendEntriesArgs{
 		Term: rf.currentTerm,
 		LeaderId: rf.me,
 		PrevLogIndex: rf.nextIndex[server] - 1,  // index of log entry immediately preceding new ones
 		PrevLogTerm: rf.logs[rf.nextIndex[server] - 1].Term,
-		LeaderCommit: rf.commitIndex, 
+		Entries: nil,
 	}
 	if !heartbeat {
+		args.LeaderCommit = rf.commitIndex
 		args.Entries = rf.logs[rf.nextIndex[server]:]
 	}
 	reply := &AppendEntriesReply{}
@@ -288,6 +297,9 @@ func (rf *Raft) sendAppendEntriesRequest(server int, heartbeat bool) {
 	defer rf.mu.Unlock()
 	if rf.currentTerm < reply.Term {
 		rf.currentTerm = reply.Term
+		rf.votedFor = -1
+		rf.state = FOLLOWER
+		rf.resetElectionTimer()
 	}
 	if rf.currentTerm != args.Term {
 		return 
@@ -332,7 +344,7 @@ func (rf *Raft) tryCommit(logIndex int) {
 		log.Printf("Leader [%d] (term %d) commits log %d", rf.me, rf.currentTerm, logIndex)
 	}
 	rf.broadcastAppendEntries(false)  // must broadcast this newly committed entry immediately
-	rf.applierCh <- 1
+	rf.applyCond.Broadcast()
 	// Then, newly committed log entries will be applied to the client asynchronously
 }
 
@@ -343,7 +355,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 	log.Printf("Server [%d] (term %d) received an AppendEntries from server [%d] at term %d", rf.me, rf.currentTerm, args.LeaderId, args.Term)
 	log.Printf("    Args: {Leader: %d, Term: %d, PrevLogIndex: %d, PrevLogTerm: %d, leaderCommit: %d, new entries count: %d}", args.LeaderId, args.Term, args.PrevLogIndex, args.PrevLogTerm, args.LeaderCommit, len(args.Entries))
-	log.Printf("    Server [%d]: {Term: %d, LastLogIndex: %d, CommitId: %d, AppliedId: %d, votedFor: %d}", rf.me, rf.currentTerm, rf.lastLogIndex(), rf.commitIndex, rf.lastApplied, rf.votedFor)
+	log.Printf("    Server [%d]: {Term: %d, LastLogIndex: %d, LastLogTerm: %d, CommitId: %d, AppliedId: %d, votedFor: %d}", rf.me, rf.currentTerm, rf.lastLogIndex(), rf.lastLogTerm(), rf.commitIndex, rf.lastApplied, rf.votedFor)
 	reply.Term = rf.currentTerm
 	reply.Success = true
 	if rf.currentTerm > args.Term {
@@ -370,6 +382,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// Delete conflicting entries and append new entires
 	if args.Entries != nil {  
 		rf.logs = append(rf.logs[:args.PrevLogIndex + 1], args.Entries...)
+		log.Printf("Follower [%d] append %d new entries", rf.me, len(args.Entries))
+		log.Printf("    %v", rf.logs)
 	}
 
 	// Apply newly committed log enties
@@ -381,7 +395,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.commitIndex = rf.lastLogIndex()
 		}
 		log.Printf("Server [%d] (term %d) commits log %d", rf.me, rf.currentTerm, rf.commitIndex)
-		rf.applierCh <- 1
+		rf.applyCond.Broadcast()
 	}
 
 }
@@ -538,8 +552,10 @@ func (rf *Raft) ticker() {
 // Apply committed log entries to the client asynchronously (the process is slow)
 func (rf *Raft) applier() {
 	for rf.killed() == false {
-		<- rf.applierCh
 		rf.mu.Lock()
+		for rf.lastApplied >= rf.commitIndex {
+			rf.applyCond.Wait()
+		}
 		if rf.lastApplied < rf.commitIndex {
 			for _, entry := range rf.logs[(rf.lastApplied + 1) : (rf.commitIndex + 1)] {
 				rf.applyCh <- ApplyMsg {
@@ -614,7 +630,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.resetElectionTimer()
 	rf.heartbeatTimer = time.NewTimer(time.Millisecond * 200)
 	
-	rf.applierCh = make(chan int)
+	rf.applyCond = sync.NewCond(&rf.mu)
 	go rf.applier()
 
 	// initialize from state persisted before a crash
