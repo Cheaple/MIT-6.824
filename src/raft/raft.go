@@ -18,14 +18,14 @@ package raft
 //
 
 import (
-	//	"bytes"
+	"bytes"
 	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	//	"6.5840/labgob"
+	"6.5840/labgob"
 	"6.5840/labrpc"
 )
 
@@ -49,9 +49,9 @@ const (
 
 // server states
 const (
-	MaxElapse = 1000		// milliseconds
-	MinElapse = 500			// milliseconds
-	HeartbeatElapse = 100	// milliseconds
+	MaxElapse = 500		// milliseconds
+	MinElapse = 100			// milliseconds
+	HeartbeatElapse = 30	// milliseconds
 )
 
 
@@ -150,6 +150,7 @@ func (rf *Raft) electLeader() {
 	rf.state = CANDIDATE
 	rf.votedFor = rf.me  // rf.me never change, so no need to avoid race
 	rf.votesGranted = 1
+	rf.persist()
 	term := rf.currentTerm  // record currentTerm to avoid race
 	log.Printf("Candidate [%d] started an election at term %d", rf.me, rf.currentTerm)
 	rf.mu.Unlock()
@@ -196,6 +197,7 @@ func (rf *Raft) electLeader() {
 				rf.state = FOLLOWER
 				rf.currentTerm = reply.Term
 				rf.votedFor = -1
+				rf.persist()
 			}
 		}(server)
 	}
@@ -235,6 +237,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.currentTerm = args.Term
 		rf.votedFor = args.CandidateId
 		rf.state = FOLLOWER
+		rf.persist()
 		rf.resetElectionTimer()
 		log.Printf("Server [%d] (term %d) votes for server [%d] (term %d)", rf.me, rf.currentTerm, args.CandidateId, args.Term)
 	}
@@ -299,6 +302,7 @@ func (rf *Raft) sendAppendEntriesRequest(server int, heartbeat bool) {
 		rf.currentTerm = reply.Term
 		rf.votedFor = -1
 		rf.state = FOLLOWER
+		rf.persist()
 		rf.resetElectionTimer()
 	}
 	if rf.currentTerm != args.Term {
@@ -368,6 +372,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
+		rf.persist()
 	}
 	rf.state = FOLLOWER  // returns to follower state
 	rf.resetElectionTimer()
@@ -382,6 +387,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// Delete conflicting entries and append new entires
 	if args.Entries != nil {  
 		rf.logs = append(rf.logs[:args.PrevLogIndex + 1], args.Entries...)
+		rf.persist()
 		log.Printf("Follower [%d] append %d new entries", rf.me, len(args.Entries))
 		log.Printf("    %v", rf.logs)
 	}
@@ -421,15 +427,14 @@ func (rf *Raft) lastLogTerm() int {
 // (or nil if there's not yet a snapshot).
 func (rf *Raft) persist() {
 	// Your code here (2C).
-
-
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.logs)
+	raftstate := w.Bytes()
+	rf.persister.Save(raftstate, nil)
+	log.Printf("Server [%d] (term %d) store persist.", rf.me, rf.currentTerm)
 }
 
 // restore previously persisted state.
@@ -438,18 +443,21 @@ func (rf *Raft) readPersist(data []byte) {
 		return
 	}
 	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var currentTerm int
+	var votedFor int
+	var logs []LogEntry
+	if d.Decode(&currentTerm) != nil || 
+		d.Decode(&votedFor) != nil || 
+		d.Decode(&logs) != nil {
+		log.Fatal("Error reading persist")
+	} else {
+	  rf.currentTerm = currentTerm
+	  rf.votedFor = votedFor
+	  rf.logs = logs
+	}
+	log.Printf("Server [%d] (term %d) read persist.", rf.me, rf.currentTerm)
 }
 
 
@@ -496,6 +504,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			Term: term,
 			Command: command,
 		})
+		rf.persist()
 		rf.matchIndex[rf.me] = index
 		rf.broadcastAppendEntries(false)  // must broadcast this newly appended entry
 	}
@@ -629,12 +638,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.electionTimer = time.NewTimer(time.Millisecond * 200)
 	rf.resetElectionTimer()
 	rf.heartbeatTimer = time.NewTimer(time.Millisecond * 200)
-	
-	rf.applyCond = sync.NewCond(&rf.mu)
-	go rf.applier()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
+	
+	// start applier to apply commited logs to client
+	rf.applyCond = sync.NewCond(&rf.mu)
+	go rf.applier()
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
