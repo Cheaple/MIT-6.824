@@ -357,9 +357,19 @@ Systems that store and process data can be grouped into two broad categories:
 #### MapReduce
 
 **MapReduce** is a programming framework with which you can write code to process
-large datasets in a distributed filesystem like **HDFS**. In Hadoop's implementation of MapReduce, the filesystem is called HDFS, an open source implementation of the Google File System (GFS), which is based on the *shared-nothing* principle.
+large datasets in a distributed file system like **HDFS** (Hadoop Distributed File Systems). In Hadoop's implementation of MapReduce, the filesystem is called HDFS, an open source implementation of the Google File System (GFS), which is based on the *shared-nothing* principle.
 
-A batch job’s output is only considered valid when the job has completed successfully (MapReduce discards the partial output of a failed job).
+A batch job’s output is only considered valid when the job has completed successfully (MapReduce discards the partial output of a failed job). Thanks to the framework, your code in a batch processing job does not need to worry about implementing fault-tolerance mechanisms: the framework can guarantee that the final output of a job is the same as if no faults had occurred.
 
 To handle these dependencies between job executions, various workflow schedulers for Hadoop have been developed, including Oozie, Azkaban, Luigi, Airflow, and Pinball. 
+
+#### Beyond MapReduce
+
+The process of writing out this intermediate state to files is called ***materialization***. An advantage of fully materializing intermediate state to a distributed filesystem is that it is **durable**, which makes fault tolerance fairly easy in MapReduce: if a task fails, it can just be restarted on another machine and read the same input again from the filesystem.
+
+Other distirbuted data engines like **Spark** avoid writing intermediate state to HDFS, so they take a different approach to tolerating faults: if a machine fails and the intermediate state on that machine is lost, it is recomputed from other data that is still available. However, when recomputing data, it is important to know whether the computation is **deterministic**: that is, given the same input data, do the operators always produce the same output?
+
+Many programming languages do not guarantee any particular order when iterating over elements of a hash table, many probabilistic and statistical algorithms explicitly rely on using random numbers, and any use of the system clock or external data sources is nondeterministic. Such causes of nondeterminism need to be removed in order to reliably recover from faults, for example by generating pseudorandom numbers using a fixed seed.
+
+### Chap 11  Stream Processing
 

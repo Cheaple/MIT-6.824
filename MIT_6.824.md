@@ -92,3 +92,10 @@ When a node is down, its successor and predecessor will connect each other to re
 
 ## Lecture 10  Cloud Replicated DB, Aurora
 
+Amazon Aurora is not a general-purpose storage system, since it must know how to rebuild the replica with only log entries.
+
+Aurora's F.T. goals:
+
++ be able to Write with one dead AZ
++ be able to Read with one dead AZ and one another server
++ fast Re-replication
