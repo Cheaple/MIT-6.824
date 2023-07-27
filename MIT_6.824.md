@@ -92,10 +92,21 @@ When a node is down, its successor and predecessor will connect each other to re
 
 ## Lecture 10  Cloud Replicated DB, Aurora
 
-Amazon Aurora is not a general-purpose storage system, since it must know how to rebuild the replica with only log entries.
+Amazon Aurora is **not** a general-purpose storage system, since it must know how to rebuild the replica with **only log entries**. (There is a trade-off between performance and usability)
 
 Aurora's F.T. goals:
 
 + be able to Write with one dead AZ
 + be able to Read with one dead AZ and one another server
 + fast Re-replication
+
+Quorum: W + R > N (to read the most recent write)
+
+## Lecture 11  Frangipani: A Scalable Distributed File System
+
+Frangipaniis a new scalabledistributed file systemthat manages a collection of disks on multiple machines as a single shared pool of storage. 
+
+All the file servers read and write the same file system data structures on the shared Petal disk, but each server keeps its own redo log of pending changes in a distinct section of the Petal disk. The logs are kept in Petal so that when a Frangipani server crashes, another server can access the log and
+run recovery.
+
+![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images\Snipaste_2023-07-27_21-22-17.png)

@@ -373,3 +373,25 @@ Many programming languages do not guarantee any particular order when iterating 
 
 ### Chap 11  Stream Processing
 
+In a stream processing context, a record is more commonly known as an ***event***. An event is generated once by a *producer* (*publisher*) and then potentially processed by multiple *consumers* (or *subscribers*). A common approach for notifying consumers about new events is to use a ***messaging system***.
+
+What happens if the producers send messages faster than the consumers can process them? Broadly speaking, there are three options: 
+
++ drop messages
++ buffer messages in a queue
++ apply *backpressure* (flow control)
+
+Messaging systems:
+
++ Direct messaging from producers to consumers: RPC, HTTP, UDP, etc.
++ ***Message Brokers***: a kind of database that is optimized for handling message streams, whichr runs as a server with producers and consumers connecting to it as clients.
+  + By centralizing the data in the broker, these systems can more easily tolerate clients that come and go (connect, disconnect, and crash), and the question of durability is moved to the broker instead.
+  + Two main patterns of messaging are used: *Load Balancing* and *Fan-out*
+
+#### Databases and Streams
+
+*Change Data Capture*:
+
+![](images\Snipaste_2023-07-26_21-13-48.png)
+
+We don't have to store the entire log history, we can just start with a consistent **snapshot** (like Lab2 Raft). The snapshot of the database must correspond to a known position or offset in the change log.
