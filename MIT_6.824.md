@@ -62,7 +62,9 @@ A log entry is **committed** once the leader that created the entry has replicat
 
 Some irratating bugs in my implementations:
 
-+ Each time append, commit, or apply a new entry, broadcast it immediately.
++ Each time a LEADER appends, commits, or applies a new entry, broadcast it immediately.
++ Each time a server switches to FOLLOWER, it must reset the election timer.
++ Each time a LEADER receive a failed AppendEntries reply, resend AppendEntries immediately. 
 + If using *channel* to implement asynchronous applier, pay attention to avoiding deadlocks!
 + Before sending out a AppendEntries RPC, make sure that the sender is still a LEADER!
 
@@ -104,9 +106,61 @@ Quorum: W + R > N (to read the most recent write)
 
 ## Lecture 11  Frangipani: A Scalable Distributed File System
 
-Frangipaniis a new scalabledistributed file systemthat manages a collection of disks on multiple machines as a single shared pool of storage. 
+Frangipaniis a new scalabledistributed file systemthat manages a collection of disks on multiple machines as a single shared pool of storage.
 
-All the file servers read and write the same file system data structures on the shared Petal disk, but each server keeps its own redo log of pending changes in a distinct section of the Petal disk. The logs are kept in Petal so that when a Frangipani server crashes, another server can access the log and
-run recovery.
+![](images\Snipaste_2023-07-27_21-22-17.png)
 
-![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images\Snipaste_2023-07-27_21-22-17.png)
+##### 4. Logging and Recovery
+
+All the file servers read and write the same file system data structures on the shared Petal disk, but each server keeps its own redo log of pending changes in a distinct section of the Petal disk. The logs are kept in Petal so that when a Frangipani server crashes, another server can access the log and run recovery.
+
+If a Frangipani server crashes, the system eventually detects the failure and runs recovery on that server’s log. Failure may be detected either by a client of the failed server, or when the lock service asks the failed server to return a lock it is holding and gets no reply.
+
+Only metadata is logged, not user data, so a user has no guarantee that the file system state is consistent from his point of view after a failure.
+
+##### 5. Synchronization and Cache Coherence
+
+Frangipani uses **multiple-reader/single-writer locks** to implement the necessary synchronization. When the lock service detects conflicting lock requests, the current holder of the lock is asked to release or downgrade it to remove the conflict.
+
+A write lock allows a server to read or write the associated data and cache it. A server’s
+cached copy of a disk block can be different from the on-disk version only if it holds the relevant write lock. Thus if a server is asked to release its write lock or downgrade it to a read lock, it must write the dirty data to disk before complying.
+
+## Lecture 12  Distributed Transactions
+
+Concurrency Control:
+
+1. Pessimistic: used when conflicts are frequent
+   + Two-Phase Locking
+2. Optimistic: avoid lock overhead
+
+In distributed settings: Two-Phase Commit
+
+![image-20230714155429648](images\image-20230714155429648.png)
+
+2PC is used only in small organizations due to its poor performance.
+
+## Lecture 13  Spanner
+
+Used for datacenters spread all over the world, each of which has multiple shards of data. A Paxos, which provides fault-tolerance, is built on all shards with the same data on each datacenter.
+
+For read&write transactions, it uses standard 2PL and 2PC, which guarantees serializability but results in high latency.
+
+For read-only transactions, it does not adopt 2PL or 2PC, but uses some complicated protocols:
+
++ Constraints:
+  + Serializability: reads should not be influenced by concurrent write transactions.
+  + Externel Consistency: a client should always read the most recent written data (not including concurrently written data necessarily) and never read stale data.
++ It adopts **Snapshot Isolation** with timestamps (ts) to realize the above characteristics.
+  + Multi-Version Concurrency Control
+  + Read will be delayed if its timestamp is more recent than the replica server's timestamp. It will wait until Paxos server updates the replica to a newer version. 
+
+Clock Synchronization by GPS satelites
+
++ Confidence Interval for clock timestamp *(Earliest, Latest)*
++ Transation Start Rule:
+  + When a r-only xactions starts, ts = now().Latest
+  + When a r/w xactions commits, ts = now().Latest
++ R/W Transaction Commit Wait:
+  + wait until ts < now().earliest
+
+## Lecture 14  FaRM, Optimistic Concurrency Control

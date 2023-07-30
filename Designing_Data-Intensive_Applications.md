@@ -321,7 +321,7 @@ In a distributed transactions, a node must only commit once it is certain that a
 
 ![image-20230714155429648](images\image-20230714155429648.png)
 
-The protocol contains two crucial "points of no return": when a participant votes "yes", it promises that it will definitely be able to commit later (although the coordinator may still choose to abort); and once the coordinator decides, that decision is irrevocableHowever, if the coordinator crashed after the nodes said "yes", nodes will fall into an uncertain state (namely, in-doubt), and they have to wait for the coordinator to recover.
+The protocol contains two crucial "points of no return": when a participant votes "yes", it promises that it will definitely be able to commit later (although the coordinator may still choose to abort); and once the coordinator decides, that decision is irrevocable. However, if the coordinator crashed after the nodes said "yes", nodes will fall into an uncertain state (namely, in-doubt), and they have to wait for the coordinator to recover.
 
 ##### Distributed Transactions in Practice
 
@@ -384,7 +384,7 @@ What happens if the producers send messages faster than the consumers can proces
 Messaging systems:
 
 + Direct messaging from producers to consumers: RPC, HTTP, UDP, etc.
-+ ***Message Brokers***: a kind of database that is optimized for handling message streams, whichr runs as a server with producers and consumers connecting to it as clients.
++ ***Message Brokers***: a kind of database that is optimized for handling message streams, which runs as a server with producers and consumers connecting to it as clients.
   + By centralizing the data in the broker, these systems can more easily tolerate clients that come and go (connect, disconnect, and crash), and the question of durability is moved to the broker instead.
   + Two main patterns of messaging are used: *Load Balancing* and *Fan-out*
 
@@ -395,3 +395,27 @@ Messaging systems:
 ![](images\Snipaste_2023-07-26_21-13-48.png)
 
 We don't have to store the entire log history, we can just start with a consistent **snapshot** (like Lab2 Raft). The snapshot of the database must correspond to a known position or offset in the change log.
+
+The contents of the database hold a caching of the latest record values in the logs. **The truth is the log**. The database is a cache of a subset of the log. That cached subset happens to be the latest value of each record and index value from the log. 
+
+With an **append-only** log of **immutable** events, it is much easier to diagnose what happened and recover from the problem. Moreover, by separating mutable state from the immutable event log, you can derive several **different read-oriented representations** from the same log of events. This works just like having multiple consumers of a stream
+
+To what extent is it feasible to keep an immutable history of all changes forever? The answer depends on the amount of churn in the dataset. Some workloads mostly add data and rarely update or delete; they are easy to make immutable.
+
+##### Fault Tolerance
+
+*Exactly-once Semantics*: In stream processing settings, each record should be processed exactly once.
+
+In **Spark**, streams are broken into small blocks and each block is treated like a miniature batch process. This approach is called *microbatching*. Within the confines of the stream processing framework, the microbatching and checkpointing approaches provide the same exactly-once semantics as batch processing. However, as soon as output leaves the stream processor.
+
+### Chap 12  The Future of Data System
+
+The most appropriate choice of software tool also depends on the circumstances.
+
+##### Derived data v.s. distributed transactions 
+
+The classic approach for keeping different data systems consistent with each other involves ***distributed transactions*** and derived data systems like ***change data captures*** (CDC). Distributed transactions use atomic commit to ensure that change take effect exactly once, while CDC are based on deterministic retry and idempotence. The biggest difference is that transaction systems usually provide linearizability, which implies useful guarantees such as reading your own writes, while derived data systems are often updated asynchronously. Since distributed transactions have poor fault tolerance and performance, log-based derived data is the most promissing approach.
+
+##### The limits of total ordering
+
+With systems that are small enough, constructing a totally ordered event log is entirely feasible. However, as systems are scaled toward bigger and more complex workloads, limitations begin to emerge. In formal terms, deciding on a total order of events is known as ***total order broadcast***, which is equivalent to consensusIt is still an open research problem to design **consensus algorithms** that can scale beyond the throughput of a single node and that work well in a geographically distributed setting.
