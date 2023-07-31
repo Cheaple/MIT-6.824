@@ -103,9 +103,8 @@ type Raft struct {
 	votesGranted		int
 
 	// for Log Compaction (Snapshot)
-	snapshot			[]byte
-	LastIncludedIndex	int
-	LastIncludedTerm	int
+	lastIncludedIndex	int
+	lastIncludedTerm	int
 }
 
 type LogEntry struct {
@@ -163,11 +162,11 @@ type InstallSnapshotReply struct {
 }
 
 func (rf *Raft) zeroLogIndex() int {
-	return rf.LastIncludedIndex
+	return rf.lastIncludedIndex
 }
 
 func (rf *Raft) lastLogIndex() int {
-	return len(rf.logs) - 1
+	return rf.logs[len(rf.logs) - 1].Index
 }
 
 func (rf *Raft) lastLogTerm() int {
@@ -175,17 +174,17 @@ func (rf *Raft) lastLogTerm() int {
 }
 
 func (rf *Raft) logAt(idx int) LogEntry {
-	return rf.logs[idx - rf.LastIncludedIndex]
+	return rf.logs[idx - rf.lastIncludedIndex]
 }
 
 func (rf *Raft) logRange(lo int, hi int) []LogEntry {
 	if lo == -1 {
-		return append([]LogEntry{}, rf.logs[: hi - rf.LastIncludedIndex]...)
+		return append([]LogEntry{}, rf.logs[: hi - rf.lastIncludedIndex]...)
 	}
 	if hi == -1 {
-		return append([]LogEntry{}, rf.logs[lo - rf.LastIncludedIndex: ]...)
+		return append([]LogEntry{}, rf.logs[lo - rf.lastIncludedIndex: ]...)
 	}
-	return append([]LogEntry{}, rf.logs[lo - rf.LastIncludedIndex: hi - rf.LastIncludedIndex]...)
+	return append([]LogEntry{}, rf.logs[lo - rf.lastIncludedIndex: hi - rf.lastIncludedIndex]...)
 }
 
 // 2A
@@ -227,15 +226,15 @@ func (rf *Raft) electLeader() {
 				// Tally votes, if it were still a Candidate
 				log.Printf("Candidate [%d] receive a vote from server [%d]", rf.me, server)
 				rf.votesGranted += 1
-				if rf.votesGranted > len(rf.peers) / 2{
+				if rf.votesGranted > len(rf.peers) / 2 {
 					log.Printf("Server [%d] becomes LEADER at term %d with %d logs", rf.me, rf.currentTerm, len(rf.logs) - 1)
 					rf.state = LEADER
 					for i, _ := range rf.peers {
-						rf.nextIndex[i] = len(rf.logs)  // reinitialize to last log + 1 (the first log's index is 1, the last log's index is len(logs) - 1)
+						rf.nextIndex[i] = rf.lastIncludedIndex + len(rf.logs)  // reinitialize to lastlog's index + 1
 						rf.matchIndex[i] = 0  // reinitialize to 0
 					}
-					rf.nextIndex[rf.me] = rf.lastLogIndex() + 1
-					rf.matchIndex[rf.me] = rf.lastLogIndex()
+					// rf.nextIndex[rf.me] = rf.lastLogIndex() + 1
+					rf.matchIndex[rf.me] = rf.nextIndex[rf.me] - 1
 					rf.broadcastAppendEntries(true)  // heartbeat
 				}
 			} else if rf.state == CANDIDATE && reply.Term > rf.currentTerm {
@@ -320,6 +319,15 @@ func (rf *Raft) sendAppendEntriesRequest(server int, heartbeat bool) {
 		rf.mu.Unlock()  
 		return  // make sure that the sender is still a LEADER
 	}
+
+
+	// When the leader has already discarded the next log entry that it needs to send to a follower
+	// send a snapshot
+	if rf.nextIndex[server] <= rf.lastIncludedIndex {
+		go rf.sendInstallSnapshotRequest(server)
+		return
+	}
+
 	log.Printf("Leader [%d] send a AppendEntries RPC to server [%d]", rf.me, server)
 	if heartbeat {
 		log.Printf("     HEARTBEAT!")
@@ -382,14 +390,14 @@ func (rf *Raft) sendAppendEntriesRequest(server int, heartbeat bool) {
 			if reply.ConflictIndex + 1 < rf.nextIndex[server] {
 				rf.nextIndex[server] = reply.ConflictIndex
 				i := rf.nextIndex[server]
-				for ; i >= 1 && rf.logAt(i).Term == reply.ConflictTerm; i -= 1 {}
+				for ; i > rf.lastIncludedIndex && rf.logAt(i).Term == reply.ConflictTerm; i -= 1 {}
 				rf.nextIndex[server] = i + 1  // new entries starts from the conflicting entry
 			}
 		}
 		log.Printf("Leader [%d] (term %d): nextIndex: %#v", rf.me, rf.currentTerm, rf.nextIndex)
 
 		
-		if rf.nextIndex[server] > rf.LastIncludedIndex {
+		if rf.nextIndex[server] > rf.lastIncludedIndex {
 			go rf.sendAppendEntriesRequest(server, false)
 		} else {
 			// 2D: Send an InstallSnapshot RPC
@@ -456,7 +464,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = false  // reply false (according to Figure 2.2.3.2)
 		reply.ConflictTerm = rf.lastLogTerm()
 		i := rf.lastLogIndex()
-		for ; i >= 1 && rf.logAt(i).Term == reply.ConflictTerm; i -= 1 {}
+		for ; i > rf.lastIncludedIndex && rf.logAt(i).Term == reply.ConflictTerm; i -= 1 {}
 		reply.ConflictIndex = i + 1
 		log.Printf("    Server [%d] Reply: {ConflictTerm: %d, ConflictIndex: %d}", rf.me, reply.ConflictTerm, reply.ConflictIndex)	
 		return
@@ -530,8 +538,16 @@ func (rf *Raft) persist() {
 	// Your code here (2C).
 	// rf.mu.Lock()
 	// defer rf.mu.Unlock()
-	rf.persister.Save(rf.stateEncoded(), rf.snapshot)
+	rf.persister.Save(rf.stateEncoded(), rf.persister.snapshot)
 	log.Printf("Server [%d] (term %d) store persist.", rf.me, rf.currentTerm)
+}
+
+func (rf *Raft) persistSnapshot(snapshot []byte) {
+	// Your code here (2C).
+	// rf.mu.Lock()
+	// defer rf.mu.Unlock()
+	rf.persister.Save(rf.stateEncoded(), snapshot)
+	log.Printf("Server [%d] (term %d) store persist (state & snapshot).", rf.me, rf.currentTerm)
 }
 
 // restore previously persisted state.
@@ -555,7 +571,8 @@ func (rf *Raft) readPersist(data []byte) {
 	  rf.votedFor = votedFor
 	  rf.logs = logs
 	}
-	log.Printf("    Server [%d]: {Term: %d, LastLogIndex: %d, CommitId: %d, AppliedId: %d, votedFor: %d}", rf.me, rf.currentTerm, rf.lastLogIndex(), rf.commitIndex, rf.lastApplied, rf.votedFor)
+	rf.lastIncludedIndex, rf.lastIncludedTerm = rf.logs[0].Index, rf.logs[0].Term
+	log.Printf("    Server [%d]: {Term: %d, LastLogIndex: %d, CommitId: %d, AppliedId: %d, votedFor: %d, zeroIndex: %d, zeroTerm: %d}", rf.me, rf.currentTerm, rf.lastLogIndex(), rf.commitIndex, rf.lastApplied, rf.votedFor, rf.lastIncludedIndex, rf.lastIncludedTerm)
 	log.Printf("    %v", rf.logs)
 }
 
@@ -571,29 +588,27 @@ func (rf *Raft) readPersist(data []byte) {
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	// rf.mu.Lock()
+	// defer rf.mu.Unlock()
 
 	// Trim logs
 	zeroIndex := rf.zeroLogIndex()
+	log.Printf("Server [%d] (first index %d) trying to store Snapshot with index %d", rf.me, zeroIndex, index)
 	if index <= zeroIndex {
 		log.Printf("Server [%d] (first index %d) rejects Snapshot with index %d", rf.me, zeroIndex, index)
 		return
 	}
-	rf.logs = append([]LogEntry{}, rf.logRange(index - zeroIndex, -1)...)
+	rf.logs = append([]LogEntry{}, rf.logRange(index, -1)...)
+	rf.lastIncludedIndex, rf.lastIncludedTerm = rf.logs[0].Index, rf.logs[0].Term
 	rf.logs[0].Command = nil  // zombie entry
-	rf.persister.Save(rf.stateEncoded(), snapshot)
+	rf.persistSnapshot(snapshot)
 	log.Printf("Server [%d] (first index %d) store Snapshot with index %d", rf.me, zeroIndex, index)
+	log.Printf("Server [%d] finished Snapshot: (%d, %d]", rf.me, rf.lastIncludedIndex, rf.lastIncludedIndex + rf.lastLogIndex())
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
 	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
 	return ok
-}
-
-// Service to install a local snapshot to raft server
-func (rf *Raft) CondInstallSnapshot () {
-
 }
 
 //
@@ -624,10 +639,10 @@ func (rf *Raft) sendInstallSnapshotRequest(server int) {
 	args := &InstallSnapshotArgs{
 		Term: 				rf.currentTerm,
 		LeaderId: 			rf.me,
-		LastIncludedIndex:	rf.LastIncludedIndex,
-		LastIncludedTerm:	rf.LastIncludedTerm,
+		LastIncludedIndex:	rf.lastIncludedIndex,
+		LastIncludedTerm:	rf.lastIncludedTerm,
 		Offset:				0,
-		Data:				rf.snapshot,
+		Data:				rf.persister.snapshot,
 		Done:				true,
 	}
 	reply := &InstallSnapshotReply{}
@@ -691,27 +706,36 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 			SnapshotIndex: 	args.LastIncludedIndex,
 		}
 	}()
-
-
-	// if rf.currentTerm < args.Term || rf.votedFor == -1|| rf.votedFor == args.CandidateId {
-	// 	// if candidate’s log is not up-to-date as receiver’s log, reply false (according to Figure 2.3.3.2)
-	// 	if rf.lastLogTerm() > args.LastLogTerm {
-	// 		log.Printf("Server [%d] (term %d) DENIed voting for server [%d] (term %d)", rf.me, rf.currentTerm, args.CandidateId, args.Term)
-	// 		return
-	// 	}
-	// 	if rf.lastLogTerm() == args.LastLogTerm && rf.lastLogIndex() > args.LastLogIndex {
-	// 		log.Printf("Server [%d] (term %d) DENIed voting for server [%d] (term %d)", rf.me, rf.currentTerm, args.CandidateId, args.Term)
-	// 		return
-	// 	}
-	// 	reply.VoteGranted = true
-	// 	rf.currentTerm = args.Term
-	// 	rf.votedFor = args.CandidateId
-	// 	rf.state = FOLLOWER
-	// 	rf.persist()
-	// 	rf.resetElectionTimer()
-	// 	log.Printf("Server [%d] (term %d) votes for server [%d] (term %d)", rf.me, rf.currentTerm, args.CandidateId, args.Term)
-	// }
 }
+
+// Service
+// install a local snapshot to raft server entirely
+func (rf *Raft) CondInstallSnapshot (lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	log.Printf("Server [%d] (term %d) received an condInstallSnapshot (term %d, index %d) from client", rf.me, rf.currentTerm, lastIncludedTerm, lastIncludedIndex)
+
+	if lastIncludedIndex <= rf.commitIndex {
+		// if the local state is newer than the snapshot, no need to store this snapshot
+		log.Printf("Server [%d] (commitIndex index %d) not need a Snapshot with index %d", rf.me, rf.commitIndex, lastIncludedIndex)
+		return false
+	}
+
+	if lastIncludedIndex >= rf.lastLogIndex() {
+		rf.logs = make([]LogEntry, 1)
+	} else {
+		rf.logs = append([]LogEntry{}, rf.logRange(lastIncludedIndex, -1)...)
+	}
+	rf.logs[0].Index = lastIncludedIndex
+	rf.logs[0].Term = lastIncludedTerm
+	rf.logs[0].Command = nil  // zombie entry
+	rf.lastIncludedIndex, rf.lastIncludedTerm = lastIncludedIndex, lastIncludedIndex
+	rf.commitIndex, rf.lastApplied = lastIncludedIndex, lastIncludedIndex
+	rf.persistSnapshot(snapshot)
+	log.Printf("Server [%d] finished CondInstallSnapshot: (%d, %d]", rf.me, lastIncludedIndex, lastIncludedIndex + rf.lastLogIndex())
+	return true
+}
+
 
 
 
@@ -890,7 +914,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.resetElectionTimer()
 	rf.heartbeatTimer = time.NewTimer(time.Millisecond * 200)
 
-	rf.LastIncludedIndex, rf.LastIncludedTerm = 0, 0
+	rf.lastIncludedIndex, rf.lastIncludedTerm = 0, 0
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
