@@ -147,13 +147,13 @@ Full automated rebalancing is convenient but dangerous. Data systems should have
 
 #### Request Routing
 
-![image-20230701111417852](images\image-20230701111417852.png)
+![image-20230701111417852](images/image-20230701111417852.png)
 
 How does the client making the routing decision learn about changes in the assignment of partitions to nodes?
 
 Many distributed data systems rely on a seperate coordination service such as **ZooKeeper** to keep track of this cluster metadata. ZooKeeper maintains the authoritative mapping of partitions to nodes. Other actors, such as the routing tier or the partitioning-aware client, can subscribe to this information in ZooKeeper. Whenever a partition changes ownership, or a node is added or removed, ZooKeeper notifies the routing tier so that it can keep its routing information up to date. It leads to a dependency on the external service Zookeeper.
 
-![image-20230701111906121](images\image-20230701111906121.png)
+![image-20230701111906121](images/image-20230701111906121.png)
 
 ### Chap 7  Transactions
 
@@ -256,7 +256,7 @@ If you use software that requires synchronized clocks, it is essential that you 
 
 A node in a distributed system must assume that its execution can be **paused** for a significant length of time at any point, even in the middle of a function. When writing multi-threaded code on a single machine, we have fairly good tools for making it thread-safe: mutexes, semaphores, atomic counters, lock-free data structures, blocking queues, and so on. Unfortunately, these tools don’t directly translate to distributed systems.
 
- ![image-20230709040900317](images\image-20230709040900317.png)
+ ![image-20230709040900317](images/image-20230709040900317.png)
 
 #### Truth & Lies in Distributed Systems
 
@@ -280,7 +280,7 @@ Safety and liveness properties and system models are very useful for reasoning a
 
 In a linearizable system, operations are totally orderd (全序), so there's no real concurrency. In a non-linearizable system, operations are partially ordered (偏序).
 
-![image-20230711161111295](images\image-20230711161111295.png)
+![image-20230711161111295](images/image-20230711161111295.png)
 
 Note: linearizability != serializability
 
@@ -319,7 +319,7 @@ In a distributed transactions, a node must only commit once it is certain that a
 
 ##### Two-Phase Commit (2PC)
 
-![image-20230714155429648](images\image-20230714155429648.png)
+![image-20230714155429648](images/image-20230714155429648.png)
 
 The protocol contains two crucial "points of no return": when a participant votes "yes", it promises that it will definitely be able to commit later (although the coordinator may still choose to abort); and once the coordinator decides, that decision is irrevocable. However, if the coordinator crashed after the nodes said "yes", nodes will fall into an uncertain state (namely, in-doubt), and they have to wait for the coordinator to recover.
 
@@ -392,7 +392,7 @@ Messaging systems:
 
 *Change Data Capture*:
 
-![](images\Snipaste_2023-07-26_21-13-48.png)
+![](images/Snipaste_2023-07-26_21-13-48.png)
 
 We don't have to store the entire log history, we can just start with a consistent **snapshot** (like Lab2 Raft). The snapshot of the database must correspond to a known position or offset in the change log.
 
@@ -419,3 +419,9 @@ The classic approach for keeping different data systems consistent with each oth
 ##### The limits of total ordering
 
 With systems that are small enough, constructing a totally ordered event log is entirely feasible. However, as systems are scaled toward bigger and more complex workloads, limitations begin to emerge. In formal terms, deciding on a total order of events is known as ***total order broadcast***, which is equivalent to consensusIt is still an open research problem to design **consensus algorithms** that can scale beyond the throughput of a single node and that work well in a geographically distributed setting.
+
+##### Stream processors and services
+
+The currently trendy style of application development involves breaking down functionality into a set of *services* that communicate via synchronous network requests such as REST APIs. The advantage of such a service-oriented architecture over a single monolithic application is primarily organizational scalability through loose coupling: different teams can work on different services, which reduces coordination effort between teams. 
+
+Neverthess, the fastest and most reliable network request is actually no network request at all. Subscribing to a stream of changes, rather than querying the current state when needed, brings us closer to a spreadsheet-like model of computation: when some piece of data changes, any derived data that depends on it can swiftly be updated.

@@ -15,7 +15,7 @@ The production replaying supports **only uni-processor**. Multi-processor is not
 
 #### 2.  Basic FT Design
 
-![image-20230630100349141](images\image-20230630100945422.png)
+![image-20230630100349141](images/image-20230630100945422.png)
 
 Shared vs. Non-shared Disk: shared disk is less complicated, but the primary and backup cannot be too far apart.
 
@@ -43,9 +43,9 @@ The time for the backup to *go live* is roughly equal to the failure detection t
 
 *Raft*: a consensus algorithm for managing a replicated log.
 
-![image-20230709162439930](images\image-20230709162439930.png)
+![image-20230709162439930](images/image-20230709162439930.png)
 
-![image-20230710011827317](images\image-20230710011827317.png)
+![image-20230710011827317](images/image-20230710011827317.png)
 
 ##### 5.2 Leader Election
 
@@ -88,7 +88,7 @@ Because only update requests are linearizable, ZooKeeper processes read requests
 
 *CRAQ*: Chain Replication with Apportioned Queries
 
-![image-20230716155541075](images\image-20230716155541075.png)
+![image-20230716155541075](images/image-20230716155541075.png)
 
 When a node is down, its successor and predecessor will connect each other to remove the down node. However, in the down node's perspective, all other nodes get down, so it will try to transform itself both HEAD and TAIL. This leads to **split brain** problem, which bring the need for an externel manager (maybe running on Raft, which is fault-torlerent).
 
@@ -108,7 +108,7 @@ Quorum: W + R > N (to read the most recent write)
 
 Frangipaniis a new scalabledistributed file systemthat manages a collection of disks on multiple machines as a single shared pool of storage.
 
-![](images\Snipaste_2023-07-27_21-22-17.png)
+![](images/Snipaste_2023-07-27_21-22-17.png)
 
 ##### 4. Logging and Recovery
 
@@ -135,7 +135,7 @@ Concurrency Control:
 
 In distributed settings: Two-Phase Commit
 
-![image-20230714155429648](images\image-20230714155429648.png)
+![image-20230714155429648](images/image-20230714155429648.png)
 
 2PC is used only in small organizations due to its poor performance.
 
@@ -145,7 +145,7 @@ Spanner is Google's scalable, **multi-version**, **globally-distributed**, and s
 
 Used for datacenters spread all over the world, each of which has multiple shards of data. A Paxos, which provides fault-tolerance, is built on all shards with the same data on each datacenter.
 
-![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images\Snipaste_2023-07-31_10-07-32.png)
+![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images/Snipaste_2023-07-31_10-07-32.png)
 
 For read&write transactions, it uses standard 2PL and 2PC, which guarantees serializability but results in high latency.
 
@@ -158,7 +158,7 @@ For read-only transactions, it does not adopt 2PL or 2PC, but uses some complica
   + Multi-Version Concurrency Control
   + Read will be delayed if its timestamp is more recent than the replica server's timestamp. It will wait until Paxos server updates the replica to a newer version.
 
-![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images\Snipaste_2023-07-31_10-14-01.png)
+![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images/Snipaste_2023-07-31_10-14-01.png)
 
 Clock Synchronization by GPS satelites
 
@@ -170,3 +170,19 @@ Clock Synchronization by GPS satelites
   + After commit, wait until `ts < now().Earliest` to wait out time uncertainty, and then apply the commit log entry.
 
 ## Lecture 14  FaRM, Optimistic Concurrency Control
+
+All replicas in the same datacenter
+
+FaRM adopts **non-volatile RAM**s (which use batteries to provide electricity during power failtures) rather than disks to store data.
+
+RDMA - Remote Direct Memory Access:
+
++ Kernel Bypass - the application communicates with the NIC directly
+
+<img src="images/image-20230731225525510.png" alt="image-20230731225525510" style="zoom: 25%;" />
+
+Optimistic Concurrency Control 
+
++ read without locks
++ buffer write until commit validation (if conflicts, abort)
++ OCC is better than pessimitic-CC in FaRM, because reads with RDMA is extraordinarily efficient.
