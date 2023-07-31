@@ -141,7 +141,11 @@ In distributed settings: Two-Phase Commit
 
 ## Lecture 13  Spanner
 
+Spanner is Google's scalable, **multi-version**, **globally-distributed**, and synchronously-replicated database. It is the first system to distribute data at global scale and support **externally-consistent distributed transactions**.
+
 Used for datacenters spread all over the world, each of which has multiple shards of data. A Paxos, which provides fault-tolerance, is built on all shards with the same data on each datacenter.
+
+![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images\Snipaste_2023-07-31_10-07-32.png)
 
 For read&write transactions, it uses standard 2PL and 2PC, which guarantees serializability but results in high latency.
 
@@ -152,15 +156,17 @@ For read-only transactions, it does not adopt 2PL or 2PC, but uses some complica
   + Externel Consistency: a client should always read the most recent written data (not including concurrently written data necessarily) and never read stale data.
 + It adopts **Snapshot Isolation** with timestamps (ts) to realize the above characteristics.
   + Multi-Version Concurrency Control
-  + Read will be delayed if its timestamp is more recent than the replica server's timestamp. It will wait until Paxos server updates the replica to a newer version. 
+  + Read will be delayed if its timestamp is more recent than the replica server's timestamp. It will wait until Paxos server updates the replica to a newer version.
+
+![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images\Snipaste_2023-07-31_10-14-01.png)
 
 Clock Synchronization by GPS satelites
 
-+ Confidence Interval for clock timestamp *(Earliest, Latest)*
++ Use confidence interval for clock timestamp *(Earliest, Latest)* to solve clock uncertainty.
 + Transation Start Rule:
-  + When a r-only xactions starts, ts = now().Latest
-  + When a r/w xactions commits, ts = now().Latest
+  + When a r-only xactions starts, `ts = now().Latest`
+  + When a r/w xactions commits, `ts > now().Latest`, and `ts >= preparation ts of each replica`
 + R/W Transaction Commit Wait:
-  + wait until ts < now().earliest
+  + After commit, wait until `ts < now().Earliest` to wait out time uncertainty, and then apply the commit log entry.
 
 ## Lecture 14  FaRM, Optimistic Concurrency Control
