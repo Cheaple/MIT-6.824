@@ -186,3 +186,13 @@ Optimistic Concurrency Control
 + read without locks
 + buffer write until commit validation (if conflicts, abort)
 + OCC is better than pessimitic-CC in FaRM, because reads with RDMA is extraordinarily efficient.
+
+## Lecture 15  Resilient Distributed Datasets & Spark
+
+We present **Resilient Distributed Datasets** (RDDs), a **distributed memory abstraction** that lets programmers perform in-memory computations on large clusters in a fault-tolerant manner. 
+
+RDDs are best suited for **batch** applications that apply the same operation to all elements of a dataset.  In these cases, RDDs can efficiently remember each transformation as one step in a **lineage graph** and can recover lost partitions without having to log large amounts of data.
+
+![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images\Snipaste_2023-08-04_22-23-10.png)
+
+## Lecture 16  Cache Consistency: Memcached at Facebook
