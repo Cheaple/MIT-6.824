@@ -135,7 +135,7 @@ type AppendEntriesArgs struct {
 	PrevLogIndex	int
 	PrevLogTerm		int
 	Entries			[]LogEntry
-	LeaderCommit	int	
+	LeaderCommit	int
 }
 
 type AppendEntriesReply struct {
@@ -143,6 +143,9 @@ type AppendEntriesReply struct {
 	Success 		bool	// true if follower contained entry matching prevLogIndex and prevLogTerm
 	ConflictTerm 	int		// term of the conflicting entry 
 	ConflictIndex	int		// the first index it stores for that term
+
+	// 2D
+	Reset			bool
 }
 
 type InstallSnapshotArgs struct {
@@ -370,7 +373,13 @@ func (rf *Raft) sendAppendEntriesRequest(server int, heartbeat bool) {
 	if rf.currentTerm != args.Term {
 		return 
 	}
-	if reply.Success {
+	if reply.Reset {
+		rf.nextIndex[server] = rf.zeroLogIndex() + len(rf.logs)  // reinitialize to lastlog's index + 1
+		log.Printf("Leader [%d] (term %d) got a RESET reply from server [%d]", rf.me, rf.currentTerm, server)
+		log.Printf("    nextIndex: %#v", rf.nextIndex)
+		log.Printf("    matchIndex: %#v", rf.matchIndex)
+		go rf.sendAppendEntriesRequest(server, heartbeat)
+	} else if reply.Success {
 		// If successful: update nextIndex and matchIndex for follower
 		// log.Printf("Server [%d] receive a success from server [%d]; update nextIndex[%d] from %d to %d", rf.me, server, server, rf.nextIndex[server], args.PrevLogIndex + len(args.Entries) + 1)
 		rf.nextIndex[server] = args.PrevLogIndex + len(args.Entries) + 1
@@ -449,6 +458,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = true
 	reply.ConflictIndex = -1
 	reply.ConflictTerm = -1
+	reply.Reset = false
 	if rf.currentTerm > args.Term {
 		reply.Success = false  // Reply false if term < currentTerm (according to Figure 2.2.3.1)
 		return
@@ -467,6 +477,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// Consistency Check
 	if args.PrevLogIndex < rf.zeroLogIndex() {
 		// 2D
+		reply.Reset = true
 		return
 	} else if args.PrevLogIndex > rf.lastLogIndex() {
 		reply.Success = false  // reply false (according to Figure 2.2.3.2)
@@ -610,7 +621,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.logs[0].Command = nil  // zombie entry
 	rf.persistSnapshot(snapshot)
 	log.Printf("Server [%d] (first index %d) store Snapshot with index %d", rf.me, zeroIndex, index)
-	log.Printf("Server [%d] finished Snapshot: (%d, %d]", rf.me, rf.zeroLogIndex(), rf.zeroLogIndex() + rf.lastLogIndex())
+	log.Printf("Server [%d] finished Snapshot: (%d, %d]", rf.me, rf.zeroLogIndex(), rf.lastLogIndex())
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
