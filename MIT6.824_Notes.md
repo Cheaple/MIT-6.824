@@ -196,3 +196,33 @@ RDDs are best suited for **batch** applications that apply the same operation to
 ![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images\Snipaste_2023-08-04_22-23-10.png)
 
 ## Lecture 16  Cache Consistency: Memcached at Facebook
+
+*Memcached* is a well known, simple, in-memory caching solution. This paper describes how Facebook leverages *memcached* as a building block to construct and scale a distributed key-value store that supports the world’s largest social network.
+
+## Lecture 18  Fork Consistency, SUNDR
+
+Topic: 
+
++ Decentralized systems
++ Byzantine participants: participants may disobey the protocay
++ Integrity
+
+Big Idea: signed logs of operations
+
++ Each log entry contains signatures of the current record as well as all the proceeding records.
+
+***SUNDR*** is a network file system designed to store data securely on **untrusted servers**. SUNDR lets clients detect any attempts at unauthorized file modification by malicious server operators or users. SUNDR’s protocol achieves a property called ***fork consistency***, which guarantees that clients can detect any integrity or consistency failures as long as they see each other’s file modifications. SUNDR cryptographically protects all file system contents so that clients can detect any unauthorized attempts to change files.
+
+![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images\Snipaste_2023-08-13_17-22-57.png)
+
+SUNDR’s protocol lets clients detect unauthorized at- tempts to modify files, even by attackers in control of the server. When the server behaves correctly, a fetch reflects exactly the authorized modifications that happened before it. We call this property *fetch-modify consistency*.
+
+#### A straw-man file system (a roughest approximation of SUNDR)
+
+The straw-man file server stores a complete, ordered list of every fetch or modify operation ever performed. Each operation also contains a digital signature from the
+user who performed it. The signature covers not just the operation but also the **complete history of all operations that precede it**.
+
+## Lecture 19  Bitcoin
+
+
+
