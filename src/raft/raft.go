@@ -362,6 +362,9 @@ func (rf *Raft) sendAppendEntriesRequest(server int, heartbeat bool) {
 	// Handle AppendEntries response (according to Figure 2.4.4.3)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	if rf.state != LEADER {
+		return
+	}
 	log.Printf("Leader [%d] (term %d) got a reply from server [%d]: %+v", rf.me, rf.currentTerm, server, reply)
 	if rf.currentTerm < reply.Term {
 		rf.currentTerm = reply.Term
@@ -607,8 +610,9 @@ func (rf *Raft) readPersist(data []byte) {
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
-	// rf.mu.Lock()
-	// defer rf.mu.Unlock()
+	log.Printf("Server [%d] (term %d) Snapshots %d", rf.me, rf.currentTerm, index)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
 	// Trim logs
 	zeroIndex := rf.zeroLogIndex()
@@ -692,9 +696,9 @@ func (rf *Raft) sendInstallSnapshotRequest(server int) {
 // Handler for InstallSnapshot RPC 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	// Your code here (2A, 2B).
+	log.Printf("Server [%d] (term %d) received an InstallSnapshot RPC from server [%d] at term %d", rf.me, rf.currentTerm, args.LeaderId, args.Term)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	log.Printf("Server [%d] (term %d) received an InstallSnapshot RPC from server [%d] at term %d", rf.me, rf.currentTerm, args.LeaderId, args.Term)
 	log.Printf("    Args: LastIncludeIndex: %d, LastIncludeTerm: %d", args.LastIncludedIndex, args.LastIncludedTerm)
 	log.Printf("    Server [%d]: {Term: %d, zeroIndex: %d, LastLogIndex: %d, LastLogTerm: %d, CommitId: %d, AppliedId: %d, votedFor: %d}", rf.me, rf.currentTerm, rf.zeroLogIndex(), rf.lastLogIndex(), rf.lastLogTerm(), rf.commitIndex, rf.lastApplied, rf.votedFor)
 	reply.Term = rf.currentTerm
@@ -746,9 +750,9 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 // Service
 // install a local snapshot to raft server entirely
 func (rf *Raft) CondInstallSnapshot (lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
+	log.Printf("Server [%d] (term %d) received an condInstallSnapshot (term %d, index %d) from client", rf.me, rf.currentTerm, lastIncludedTerm, lastIncludedIndex)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	log.Printf("Server [%d] (term %d) received an condInstallSnapshot (term %d, index %d) from client", rf.me, rf.currentTerm, lastIncludedTerm, lastIncludedIndex)
 
 	if lastIncludedIndex <= rf.commitIndex {
 		// if the local state is newer than the snapshot, no need to store this snapshot
@@ -867,18 +871,24 @@ func (rf *Raft) applier() {
 		for rf.lastApplied >= rf.commitIndex {
 			rf.applyCond.Wait()
 		}
-		if rf.lastApplied < rf.commitIndex {
-			for _, entry := range rf.logRange(rf.lastApplied + 1, rf.commitIndex + 1) {
-				rf.applyCh <- ApplyMsg {
-					Command: entry.Command,
-					CommandIndex: entry.Index,
-					CommandValid: true,
-				}
-				log.Printf("Server [%d] (term %d) applied log entry %d: %+v", rf.me, rf.currentTerm, entry.Index, entry)
+		commitIndex := rf.commitIndex
+		entries := rf.logRange(rf.lastApplied + 1, rf.commitIndex + 1)
+		rf.mu.Unlock()
+		for _, entry := range entries {
+			rf.applyCh <- ApplyMsg {
+				Command: entry.Command,
+				CommandIndex: entry.Index,
+				CommandValid: true,
 			}
-
+			log.Printf("Server [%d] (term %d) applied log entry %d: %+v", rf.me, rf.currentTerm, entry.Index, entry)
 		}
-		rf.lastApplied = rf.commitIndex
+
+
+		rf.mu.Lock()
+		// Note: in 2D, after Snapshot(), it is possible that the current rf.lastApplied is greater than commitIndex
+		if rf.lastApplied < commitIndex {
+			rf.lastApplied = commitIndex
+		}
 		rf.mu.Unlock()
 	}
 
