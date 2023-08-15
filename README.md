@@ -45,9 +45,9 @@ The time for the backup to *go live* is roughly equal to the failure detection t
 
 *Raft*: a consensus algorithm for managing a replicated log.
 
-![image-20230709162439930](images\image-20230709162439930.png)
+![image-20230709162439930](images/image-20230709162439930.png)
 
-![image-20230710011827317](images\image-20230710011827317.png)
+![image-20230710011827317](images/image-20230710011827317.png)
 
 ##### 5.2 Leader Election
 
@@ -90,7 +90,7 @@ Because only update requests are linearizable, ZooKeeper processes read requests
 
 *CRAQ*: Chain Replication with Apportioned Queries
 
-![image-20230716155541075](images\image-20230716155541075.png)
+![image-20230716155541075](images/image-20230716155541075.png)
 
 When a node is down, its successor and predecessor will connect each other to remove the down node. However, in the down node's perspective, all other nodes get down, so it will try to transform itself both HEAD and TAIL. This leads to **split brain** problem, which bring the need for an externel manager (maybe running on Raft, which is fault-torlerent).
 
@@ -110,7 +110,7 @@ Quorum: W + R > N (to read the most recent write)
 
 Frangipaniis a new scalabledistributed file systemthat manages a collection of disks on multiple machines as a single shared pool of storage.
 
-![](images\Snipaste_2023-07-27_21-22-17.png)
+![](images/Snipaste_2023-07-27_21-22-17.png)
 
 ##### 4. Logging and Recovery
 
@@ -137,7 +137,7 @@ Concurrency Control:
 
 In distributed settings: Two-Phase Commit
 
-![image-20230714155429648](images\image-20230714155429648.png)
+![image-20230714155429648](images/image-20230714155429648.png)
 
 2PC is used only in small organizations due to its poor performance.
 
@@ -147,7 +147,7 @@ Spanner is Google's scalable, **multi-version**, **globally-distributed**, and s
 
 Used for datacenters spread all over the world, each of which has multiple shards of data. A Paxos, which provides fault-tolerance, is built on all shards with the same data on each datacenter.
 
-![](images\Snipaste_2023-07-31_10-07-32.png)
+![](images/Snipaste_2023-07-31_10-07-32.png)
 
 For read&write transactions, it uses standard 2PL and 2PC, which guarantees serializability but results in high latency.
 
@@ -160,7 +160,7 @@ For read-only transactions, it does not adopt 2PL or 2PC, but uses some complica
   + Multi-Version Concurrency Control
   + Read will be delayed if its timestamp is more recent than the replica server's timestamp. It will wait until Paxos server updates the replica to a newer version.
 
-![](images\Snipaste_2023-07-31_10-14-01.png)
+![](images/Snipaste_2023-07-31_10-14-01.png)
 
 Clock Synchronization by GPS satelites
 
@@ -181,7 +181,7 @@ RDMA - Remote Direct Memory Access:
 
 + Kernel Bypass - the application communicates with the NIC directly
 
-<img src="images\image-20230731225525510.png" alt="image-20230731225525510" style="zoom: 25%;" />
+<img src="images/image-20230731225525510.png" alt="image-20230731225525510" style="zoom: 25%;" />
 
 Optimistic Concurrency Control 
 
@@ -195,7 +195,7 @@ We present **Resilient Distributed Datasets** (RDDs), a **distributed memory abs
 
 RDDs are best suited for **batch** applications that apply the same operation to all elements of a dataset.  In these cases, RDDs can efficiently remember each transformation as one step in a **lineage graph** and can recover lost partitions without having to log large amounts of data.
 
-![](images\Snipaste_2023-08-04_22-23-10.png)
+![](images/Snipaste_2023-08-04_22-23-10.png)
 
 ## Lecture 16  Cache Consistency: Memcached at Facebook
 
@@ -215,7 +215,7 @@ Big Idea: signed logs of operations
 
 ***SUNDR*** is a network file system designed to store data securely on **untrusted servers**. SUNDR lets clients detect any attempts at unauthorized file modification by malicious server operators or users. SUNDR’s protocol achieves a property called ***fork consistency***, which guarantees that clients can detect any integrity or consistency failures as long as they see each other’s file modifications. SUNDR cryptographically protects all file system contents so that clients can detect any unauthorized attempts to change files.
 
-![](images\Snipaste_2023-08-13_17-22-57.png)
+![](images/Snipaste_2023-08-13_17-22-57.png)
 
 SUNDR’s protocol lets clients detect unauthorized at- tempts to modify files, even by attackers in control of the server. When the server behaves correctly, a fetch reflects exactly the authorized modifications that happened before it. We call this property *fetch-modify consistency*.
 
@@ -230,9 +230,9 @@ user who performed it. The signature covers not just the operation but also the 
 
 Each owner transfers the coin to the next by digitally signing a hash of the previous transaction and the public key of the next owner and adding these to the end of the coin. A payee can verify the signatures to verify the chain of ownership.
 
-![](images\Snipaste_2023-08-15_11-11-40.png)
+![](images/Snipaste_2023-08-15_11-11-40.png)
 
-![](images\Snipaste_2023-08-15_11-33-12.png)
+![](images/Snipaste_2023-08-15_11-33-12.png)
 
 ##### 4. Proof-of-Work
 
