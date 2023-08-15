@@ -1,5 +1,7 @@
 # MIT 6.824
 
+Notes of Lectures & Papers:
+
 ## Lecture 4  Fault-Tolerant (FT) Virtual Machine
 
 Two types of replications:
@@ -224,5 +226,32 @@ user who performed it. The signature covers not just the operation but also the 
 
 ## Lecture 19  Bitcoin
 
+##### 2. Transactions
 
+Each owner transfers the coin to the next by digitally signing a hash of the previous transaction and the public key of the next owner and adding these to the end of the coin. A payee can verify the signatures to verify the chain of ownership.
 
+![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images\Snipaste_2023-08-15_11-11-40.png)
+
+![](D:\Documents\School\Study\CS\Distributed Systems\Mit-6.824-Labs\images\Snipaste_2023-08-15_11-33-12.png)
+
+##### 4. Proof-of-Work
+
+For our timestamp network, we implement the **proof-of-work** by incrementing a **nonce** in the block until a value is found that gives the block's hash **the required zero bits**.
+
+##### 5. Network
+
+The steps to run the network are as follows:
+
+1. New transactions are broadcast to all nodes.
+2. Each node collects new transactions into a block.
+3. Each node works on finding a difficult proof-of-work for its block.
+4. When a node finds a proof-of-work, it broadcasts the block to all nodes.
+5. Nodes accept the block only if all transactions in it are valid and not already spent.
+6. Nodes express their acceptance of the block by working on creating the next block in
+7. the chain, using the hash of the accepted block as the previous hash.
+
+The **longest chain** not only serves as proof of the sequence of events witnessed, but proof that it came from the **largest pool of CPU power**.
+
+##### 5. Incentive (Mining)
+
+By convention, the first transaction in a block is a special transaction that starts a new coin owned by the creator of the block. This adds an incentive for nodes to support the network, and provides a way to initially distribute coins into circulation, since there is no central authority to issue them.
