@@ -98,6 +98,7 @@ type Raft struct {
 	// Others
 	applyCh				chan ApplyMsg
 	applyCond      		*sync.Cond
+	applyMu				sync.Mutex
 	electionTimer		*time.Timer
 	heartbeatTimer		*time.Timer
 	votesGranted		int
@@ -179,7 +180,7 @@ func (rf *Raft) lastLogTerm() int {
 }
 
 func (rf *Raft) logAt(idx int) LogEntry {
-	log.Printf("     logAt: %d - %d", idx, rf.logs[0].Index)
+	// log.Printf("     logAt: %d - %d", idx, rf.logs[0].Index)
 	return rf.logs[idx - rf.logs[0].Index]
 }
 
@@ -750,6 +751,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.logs[0].Term = args.LastIncludedTerm
 	rf.commitIndex, rf.lastApplied = args.LastIncludedIndex, args.LastIncludedIndex
 	rf.persistSnapshot(args.Data)
+	rf.applyMu.Lock()
 	func() {
 		rf.applyCh <- ApplyMsg {
 			CommandValid: 	false,
@@ -760,6 +762,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		}
 	}()  // synchronously install snapshot to the client
 	log.Printf("%s [%d] applied InstallSnapshot (%d, ...]: %+v", rf.state, rf.me, args.LastIncludedIndex, args.Data)
+	rf.applyMu.Unlock()
 }
 
 // Service
@@ -888,6 +891,8 @@ func (rf *Raft) applier() {
 		commitIndex := rf.commitIndex
 		entries := rf.logRange(rf.lastApplied + 1, rf.commitIndex + 1)
 		rf.mu.Unlock()
+
+		rf.applyMu.Lock()
 		for _, entry := range entries {
 			log.Printf("%s [%d] (term %d) applied log entry %d: %+v", rf.state, rf.me, rf.currentTerm, entry.Index, entry)
 			rf.applyCh <- ApplyMsg {
@@ -896,6 +901,7 @@ func (rf *Raft) applier() {
 				CommandValid: true,
 			}
 		}
+		rf.applyMu.Unlock()
 
 		rf.mu.Lock()
 		// Note: in 2D, after Snapshot(), it is possible that the current rf.lastApplied is greater than commitIndex
