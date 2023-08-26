@@ -7,6 +7,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const Debug = false
@@ -23,6 +24,9 @@ type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Key		string
+	Value	string
+	Op		string
 }
 
 type KVServer struct {
@@ -32,18 +36,62 @@ type KVServer struct {
 	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
 
-	maxraftstate int // snapshot if log grows this big
+	maxraftstate 	int 	// snapshot if log grows this big
 
 	// Your definitions here.
+	notifyChan		map[int]chan CommandResponse 	// channels used to notify clients after logs get applied
 }
 
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
+	op := &Op{
+		Key: args.Key,
+		Op: "Get",
+	}
+	i, _, isLeader := kv.rf.Start(op)
+	if !isLeader {
+		// Check Raft leader
+		reply.Err = ErrWrongLeader
+		return
+	}
+	ch := make(chan CommandResponse, 1)
+	kv.mu.Lock()
+	kv.notifyChan[i] = ch
+	kv.mu.Unlock()
+
+	// Wait until the command got commited and applied by Raft
+	select {
+	case response := <- ch:
+		reply.Err, reply.Value = response.Err, response.Value 
+	case <- time.After(TIMEOUT_INTEVAL):
+		reply.Err = ErrTimeout
+	}
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+	op := &Op{
+		Key: args.Key,
+		Value: args.Value,
+		Op: args.Op,
+	}
+	i, _, isLeader := kv.rf.Start(op)
+	if !isLeader {
+		// Check Raft leader
+		reply.Err = ErrWrongLeader
+		return
+	}
+	ch := make(chan CommandResponse, 1)
+	kv.mu.Lock()
+	kv.notifyChan[i] = ch
+	kv.mu.Unlock()
+
+	// Wait until the command got commited and applied by Raft
+	select {
+	case response := <- ch:
+		reply.Err = response.Err
+	case <- time.After(TIMEOUT_INTEVAL):
+		reply.Err = ErrTimeout
+	}
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -63,6 +111,26 @@ func (kv *KVServer) Kill() {
 func (kv *KVServer) killed() bool {
 	z := atomic.LoadInt32(&kv.dead)
 	return z == 1
+}
+
+//
+func (kv *KVServer) applier() {
+	for kv.killed() == false {
+		select {
+		case msg := <- kv.applyCh:
+			log.Printf("Client receives an ApplyMsg: %+v", msg)
+			if msg.CommandValid {
+				kv.notifyChan[msg.CommandIndex] <- CommandResponse{
+					Err: OK,
+				}
+			}
+			if !msg.CommandValid {
+				// Snapshot message
+				return
+			}
+		}
+	
+	}
 }
 
 // servers[] contains the ports of the set of
@@ -92,6 +160,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
+	kv.notifyChan = make(map[int]chan CommandResponse)
+	go kv.applier()
 
 	return kv
 }

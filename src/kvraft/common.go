@@ -1,9 +1,15 @@
 package kvraft
 
 const (
-	OK             = "OK"
-	ErrNoKey       = "ErrNoKey"
-	ErrWrongLeader = "ErrWrongLeader"
+	OK             	= "OK"
+	ErrNoKey       	= "ErrNoKey"
+	ErrWrongLeader 	= "ErrWrongLeader"
+	ErrTimeout		= "ErrTimeout"
+)
+
+const (
+	RETRY_INTEVAL = 500  // milliseconds
+	TIMEOUT_INTEVAL = 1000
 )
 
 type Err string
@@ -30,4 +36,9 @@ type GetArgs struct {
 type GetReply struct {
 	Err   Err
 	Value string
+}
+
+type CommandResponse struct {
+	Err		Err
+	Value	string
 }
