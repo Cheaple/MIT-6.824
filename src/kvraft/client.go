@@ -14,6 +14,8 @@ type Clerk struct {
 	// You will have to modify this struct.
 
 	leaderId	int32
+	clientId	int64
+	nextRequest	int
 }
 
 func nrand() int64 {
@@ -27,34 +29,33 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// You'll have to add code here.
+	ck.clientId = nrand()
+	ck.nextRequest = 1
 	return ck
 }
 
-// fetch the current value for a key.
-// returns "" if the key does not exist.
-// keeps trying forever in the face of all other errors.
-//
-// you can send an RPC with code like this:
-// ok := ck.servers[i].Call("KVServer.Get", &args, &reply)
-//
-// the types of args and reply (including whether they are pointers)
-// must match the declared types of the RPC handler function's
-// arguments. and reply must be passed as a pointer.
-func (ck *Clerk) Get(key string) string {
-	args := GetArgs{
+func (ck *Clerk) Command(key string, value string, op Opr) string {
+	args := CommandArgs{
 		Key: key,
+		Value: value,
+		Op: op,
+		ClientId: ck.clientId,
+		CommandId: ck.nextRequest,
 	}
 	i := ck.currentServer()
 
 	// keeps trying forever in the face of all other errors.
 	for true {
-		log.Printf("Client send Get command to leader [%d]", i)
-		reply := GetReply{}
-		ok := ck.servers[i].Call("KVServer.Get", &args, &reply)
+		log.Printf("Client [%d] send %s command to server [%d]: %+v", ck.clientId, op, i, args)
+		reply := CommandReply{}
+		ok := ck.servers[i].Call("KVServer.CommandHandler", &args, &reply)
 		if ok {
 			if reply.Err == OK {
-				log.Printf("Client Get %s: %s", key, reply.Value)
+				log.Printf("Client [%d] %s %s: %s", ck.clientId, op, key, reply.Value)
+				ck.nextRequest += 1
 				return reply.Value
+			} else if reply.Err == ErrTimeout {
+				log.Printf("Client [%d] %s %s command timeout", ck.clientId, op, key)
 			}
 		}
 		i = ck.nextServer(i)
@@ -64,45 +65,15 @@ func (ck *Clerk) Get(key string) string {
 	return ""
 }
 
-// shared by Put and Append.
-//
-// you can send an RPC with code like this:
-// ok := ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
-//
-// the types of args and reply (including whether they are pointers)
-// must match the declared types of the RPC handler function's
-// arguments. and reply must be passed as a pointer.
-func (ck *Clerk) PutAppend(key string, value string, op string) {
-	args := PutAppendArgs{
-		Key: key,
-		Value: value,
-		Op: op,
-	}
-	i := ck.currentServer()
-
-	// keeps trying forever in the face of all other errors.
-	for true {
-		log.Printf("Client send PutAppend command to leader [%d]", i)
-		reply := PutAppendReply{}
-		ok := ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
-		if ok {
-			if reply.Err == OK {
-				log.Printf("Client %s %s: %s", op, key, value)
-				return
-			} else if reply.Err == ErrTimeout {
-				log.Printf("Client %s %s command timeout", op, key)
-			}
-		}
-		i = ck.nextServer(i)
-		time.Sleep(RETRY_INTEVAL)
-	}	
+func (ck *Clerk) Get(key string) string {
+	return ck.Command(key, "", "Get")
 }
 
 func (ck *Clerk) Put(key string, value string) {
-	ck.PutAppend(key, value, "Put")
+	ck.Command(key, value, "Put")
 }
 func (ck *Clerk) Append(key string, value string) {
-	ck.PutAppend(key, value, "Append")
+	ck.Command(key, value, "Append")
 }
 
 func (ck *Clerk) currentServer() int32 {
@@ -111,6 +82,9 @@ func (ck *Clerk) currentServer() int32 {
 
 
 func (ck *Clerk) nextServer(current int32) int32 {
+	if current + 1 == int32(len(ck.servers)) {
+		time.Sleep(TIMEOUT_INTEVAL)
+	}
 	next := (current + 1) % int32(len(ck.servers))
 	atomic.StoreInt32(&ck.leaderId, next)
 	return next
