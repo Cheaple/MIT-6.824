@@ -51,6 +51,7 @@ type CommandArgs struct {
 	Op		Opr
 	ClientId	int64
 	CommandId	int
+	// Non			int64
 }
 
 type CommandReply struct {
