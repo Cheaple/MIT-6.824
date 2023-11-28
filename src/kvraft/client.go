@@ -13,7 +13,7 @@ type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
 
-	leaderId	int32
+	leaderId	int64
 	clientId	int64
 	nextRequest	int
 }
@@ -41,12 +41,13 @@ func (ck *Clerk) Command(key string, value string, op Opr) string {
 		Op: op,
 		ClientId: ck.clientId,
 		CommandId: ck.nextRequest,
+		// Non: nrand(),
 	}
 	i := ck.currentServer()
 
 	// keeps trying forever in the face of all other errors.
 	for true {
-		log.Printf("Client [%d] send %s command to server [%d]: %+v", ck.clientId, op, i, args)
+		// log.Printf("Client [%d] send %s command to server [%d]: %+v", ck.clientId, op, i, args)
 		reply := CommandReply{}
 		ok := ck.servers[i].Call("KVServer.CommandHandler", &args, &reply)
 		if ok {
@@ -76,16 +77,16 @@ func (ck *Clerk) Append(key string, value string) {
 	ck.Command(key, value, "Append")
 }
 
-func (ck *Clerk) currentServer() int32 {
-	return atomic.LoadInt32(&ck.leaderId)
+func (ck *Clerk) currentServer() int64 {
+	return atomic.LoadInt64(&ck.leaderId)
 }
 
 
-func (ck *Clerk) nextServer(current int32) int32 {
-	if current + 1 == int32(len(ck.servers)) {
+func (ck *Clerk) nextServer(current int64) int64 {
+	if current + 1 == int64(len(ck.servers)) {
 		time.Sleep(TIMEOUT_INTEVAL)
 	}
-	next := (current + 1) % int32(len(ck.servers))
-	atomic.StoreInt32(&ck.leaderId, next)
+	next := (current + 1) % int64(len(ck.servers))
+	atomic.StoreInt64(&ck.leaderId, next)
 	return next
 }

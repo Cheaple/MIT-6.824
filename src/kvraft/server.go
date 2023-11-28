@@ -51,16 +51,25 @@ type KVServer struct {
 }
 
 func (kv *KVServer) CommandHandler(args *CommandArgs, reply *CommandReply) {
-	// Check duplicate command
-	log.Printf("Server receives a command from client [%d]: %s", args.ClientId, reply.Value)
+	log.Printf("Server [%d] receives a command from client [%d]: %+v", kv.me, args.ClientId, *args)
+
+	// Check if leader
+	if _, isLeader := kv.rf.GetState(); !isLeader {
+		log.Printf("   Not Leader, drop")
+		reply.Err = ErrWrongLeader
+		return
+	}
+
 	kv.mu.Lock()
+	// Check duplicate command
 	if lastCommand, ok := kv.clientLastCommand[args.ClientId]; ok && lastCommand >= args.CommandId {
-		log.Printf("   Duplicate client command, drop")
+		log.Printf("   Server [%d]: Duplicate client command, drop", kv.me)
 		reply.Value = kv.clientCommandReply[args.ClientId].Value
 		reply.Err = kv.clientCommandReply[args.ClientId].Err
 		kv.mu.Unlock()
 		return
 	}
+	kv.clientLastCommand[args.ClientId] = args.CommandId  // to prevent duplicate commands 
 	kv.mu.Unlock()
 
 	op := Op{
@@ -69,7 +78,8 @@ func (kv *KVServer) CommandHandler(args *CommandArgs, reply *CommandReply) {
 		Op: args.Op,
 		ClientId: args.ClientId,
 	}
-	i, _, isLeader := kv.rf.Start(op)
+	i, _, isLeader := kv.rf.Start(op)  // should not be locked, to increase throughput
+	log.Printf("Server [%d]: KV Server Starts command %d: %+v", kv.me, i, op)
 	if !isLeader {
 		// Check Raft leader
 		log.Printf("   Not Leader, drop")
@@ -77,18 +87,21 @@ func (kv *KVServer) CommandHandler(args *CommandArgs, reply *CommandReply) {
 		// kv.mu.Unlock()
 		return
 	}
-	log.Printf("KV Server start: %+v", op)
-	ch := make(chan CommandReply, 1)
 	kv.mu.Lock()
+	log.Printf("Server [%d]: KV Server finish Starts command %d: %+v", kv.me, i, op)
+	ch := make(chan CommandReply)
 	kv.notifyChan[i] = ch
+	log.Printf("Server [%d]: prepare notify channel [%d] response", kv.me, i)
 	kv.mu.Unlock()
 
 	// Wait until the command got commited and applied by Raft
 	select {
 	case response := <- ch:
 		reply.Err, reply.Value = response.Err, response.Value 
+		log.Printf("Server [%d]: KV Server finish command %d: %+v", kv.me, i, reply)
 	case <- time.After(TIMEOUT_INTEVAL):
 		reply.Err = ErrTimeout
+		log.Printf("Server [%d]: KV Server finish command %d: %+v", kv.me, i, reply)
 	}
 }
 
@@ -116,17 +129,18 @@ func (kv *KVServer) applier() {
 	for kv.killed() == false {
 		select {
 		case msg := <- kv.applyCh:
-			log.Printf("KV Server receives an ApplyMsg: %+v", msg)
+			log.Printf("Server [%d]: KV Server receives an ApplyMsg: %+v", kv.me, msg)
 			if msg.CommandValid {
 				kv.mu.Lock()
 				if msg.CommandIndex <= kv.lastApplied {
-					log.Printf("   Duplicate ApplyMsg, drop")
+					log.Printf("   Server [%d]: Duplicate ApplyMsg, drop", kv.me)
 					kv.mu.Unlock()
 					continue
 				}
 				cmd := msg.Command.(Op)
-				kv.clientLastCommand[cmd.ClientId] = msg.CommandIndex
 				reply := CommandReply{}
+
+				// apply to state machine
 				if cmd.Op == GET {
 					reply.Err, reply.Value = kv.kvStore.Get(cmd.Key)
 				} else if cmd.Op == PUT {
@@ -134,12 +148,20 @@ func (kv *KVServer) applier() {
 				} else if cmd.Op == APPEND {
 					reply.Err = kv.kvStore.Append(cmd.Key, cmd.Value)
 				}
+				kv.clientLastCommand[cmd.ClientId] = msg.CommandIndex
 				kv.clientCommandReply[cmd.ClientId] = reply
 				kv.lastApplied = msg.CommandIndex
+				ch := kv.notifyChan[msg.CommandIndex]
+
+				// After leader applies a log to the state machine, notify the client
+				if _, isLeader := kv.rf.GetState(); isLeader {
+					log.Printf("Server [%d]: After applying command [%d], KV Server notifies response: %+v", kv.me, msg.CommandIndex, msg)
+					go func() { ch <- reply }()
+				}
 				kv.mu.Unlock()
 
-				// After applying a log to the state machine, notify the client
-				kv.notifyChan[msg.CommandIndex] <- reply
+				
+
 			}
 			if !msg.CommandValid {
 				// Snapshot message
@@ -169,18 +191,23 @@ func MakeKVStore() *KVStore {
 
 func (kvStore *KVStore) Get(key string) (Err, string) {
 	if value, ok := kvStore.data[key]; ok {
+		log.Printf("KVStore Get: kv[%s] = %s", key, kvStore.data[key])
 		return OK, value
 	}
+	log.Printf("KVStore GET: No kv[%s", key)
 	return ErrNoKey, ""
 }
 
 func (kvStore *KVStore) Put(key string, value string) Err {
 	kvStore.data[key] = value
+	log.Printf("KVStore Put: kv[%s] = %s", key, kvStore.data[key])
 	return OK
 }
 
+// Note: non-idempotence
 func (kvStore *KVStore) Append(key string, value string) Err {
 	kvStore.data[key] += value
+	log.Printf("KVStore Append: kv[%s] = %s", key, kvStore.data[key])
 	return OK
 }
 
@@ -206,7 +233,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.maxraftstate = maxraftstate
 
 	// You may need initialization code here.
-
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
