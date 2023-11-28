@@ -47,90 +47,70 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	// Your worker implementation here.
 	for true {
-		reply := CallTask()
-		// fmt.Println(reply)
+		reply := callTask()
+		// log.Println(reply)
 		if reply.TaskType == MapTask {
-			// fmt.Println("Start map()")
+			// log.Printf("Start map task %d\n", reply.Idx)
 			doMap(&reply, mapf)
 		} else if reply.TaskType == ReduceTask {
-			// fmt.Println("Start reduce()")
+			// log.Printf("Start reduce task %d\n", reply.Idx)
 			doReduce(&reply, reducef)
-		} else if reply.TaskType == FinishTask {
-			time.Sleep(time.Second)
+		} else if reply.TaskType == NoTask {
+			// Although there are no more task,
+			// this worker cannot exit immediately,
+			// since there may be some new tasks (due to other worker's failures)
+			time.Sleep(2 * time.Second)
 		} else {
 			break
 		}
 	}
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
 }
+
 
 //
 // example function to show how to make an RPC call to the coordinator.
 //
 // the RPC argument and reply types are defined in rpc.go.
 //
-func CallExample() {
+// func CallExample() {
 
-	// declare an argument structure.
-	args := ExampleArgs{}
+// 	// declare an argument structure.
+// 	args := ExampleArgs{}
 
-	// fill in the argument(s).
-	args.X = 99
+// 	// fill in the argument(s).
+// 	args.X = 99
 
-	// declare a reply structure.
-	reply := ExampleReply{}
+// 	// declare a reply structure.
+// 	reply := ExampleReply{}
 
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
-	}
-}
+// 	// send the RPC request, wait for the reply.
+// 	// the "Coordinator.Example" tells the
+// 	// receiving server that we'd like to call
+// 	// the Example() method of struct Coordinator.
+// 	ok := call("Coordinator.Example", &args, &reply)
+// 	if ok {
+// 		// reply.Y should be 100.
+// 		log.Printf("reply.Y %v\n", reply.Y)
+// 	} else {
+// 		log.Printf("call failed!\n")
+// 	}
+// }
+
 
 //
-// send an RPC request to the coordinator, wait for the response.
-// usually returns true.
-// returns false if something goes wrong.
+// Perform Map task
 //
-func call(rpcname string, args interface{}, reply interface{}) bool {
-	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
-	sockname := coordinatorSock()
-	c, err := rpc.DialHTTP("unix", sockname)
-	if err != nil {
-		log.Fatal("dialing:", err)
-	}
-	defer c.Close()
-
-	err = c.Call(rpcname, args, reply)
-	if err == nil {
-		return true
-	}
-
-	fmt.Println(err)
-	return false
-}
-
-
 func doMap(task *MyReply, mapf func(string, string) []KeyValue) {
-	// read the input file,
-	// pass it to Map.
-	//
+	// read the input file, pass it to Map
 	filepath := task.FileList[0]
 	file, err := os.Open(filepath)
 	defer file.Close()
 	if err != nil {
-		log.Fatalf("cannot open %v", filepath)
+		log.Fatalf("Error opening %v", filepath)
 	}
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
-		log.Fatalf("cannot read %v", filepath)
+		log.Fatalf("Error reading %v", filepath)
 	}
 	
 	// partition and store the intermediate 
@@ -138,21 +118,23 @@ func doMap(task *MyReply, mapf func(string, string) []KeyValue) {
 	kvas := partition(kva, task.NReduce)
 	for i := 0; i < task.NReduce; i++ {
 		reduceFilepath := writeMapResults(kvas[i], task.Idx, i)
-		_ = sendMapResults(reduceFilepath, i)
+		_ = notifyMapResults(reduceFilepath, i)
 	}
-	// fmt.Println("Finish map work")
-	_ = callTaskDone(MsgMapDone, task.Idx)
-	// fmt.Println("Finish map()")
+	_ = notifyTaskDone(MsgMapDone, task.Idx)
+	// log.Println("Finish map()")
 }
 
+//
+// Perform Reduce task
+//
 func doReduce(task *MyReply, reducef func(string, []string) string) {
-	// merge values with the same key together
+	// merge data from all input files
 	kva := []KeyValue{}
 	for _, filepath := range task.FileList {
 		file, err := os.Open(filepath)
 		defer file.Close()
 		if err != nil {
-			log.Fatalf("cannot open %v", filepath)
+			log.Fatalf("Error opening %v", filepath)
 		}
 		decoder := json.NewDecoder(file)
 		for true {
@@ -165,25 +147,35 @@ func doReduce(task *MyReply, reducef func(string, []string) string) {
 		}
 	}
 	sort.Sort(ByKey(kva))
-	// fmt.Println(kva)
 
+	// output reduce results
 	oname := "mr-out-"+strconv.Itoa(task.Idx)
-	ofile, _ := os.Create(oname)
-	defer ofile.Close()
+	ofile, err := ioutil.TempFile(".", "tmp-" + oname)
+	if err != nil {
+		fmt.Println("Error creating temp file:", err)
+	}
+
 	for i := 0; i < len(kva); {
-		// fmt.Println(kva[i])
 		key := kva[i].Key
 		values := []string{}
 		for i < len(kva) && key == kva[i].Key  {
+			// merge values with the same key together
 			values = append(values, kva[i].Value)
 			i += 1
 		}
 		fmt.Fprintf(ofile, "%v %v\n", key, reducef(key, values))
 	}
-	_ = callTaskDone(MsgReduceDone, task.Idx)
-	// fmt.Println("Finish reduce()")
+	ofile.Close()
+	err = os.Rename(ofile.Name(), oname)
+	if err != nil {
+		log.Println("Error renaming temp file:", err)
+	}
+	_ = notifyTaskDone(MsgReduceDone, task.Idx)
+	// log.Println("Finish reduce()")
 }
 
+
+// partition intermediate results
 func partition(kva []KeyValue, n int) [][]KeyValue {
 	kvas := make([][]KeyValue, n)
 	for _, kv := range kva {
@@ -196,35 +188,55 @@ func partition(kva []KeyValue, n int) [][]KeyValue {
 // Write Map output (KeyValue pairs) to a Json file
 func writeMapResults(kva []KeyValue, idx int, idxReduce int) string {
 	filepath := "mr-" + strconv.Itoa(idx) + "-" + strconv.Itoa(idxReduce)
-	file, _ := os.Create(filepath)
+	file, err := ioutil.TempFile(".", "tmp-" + filepath)
+	if err != nil {
+		fmt.Println("Error creating temp file:", err)
+	}
 
 	encoder := json.NewEncoder(file)
 	for _, kv := range kva {
 		err := encoder.Encode(&kv)
 		if err != nil {
-			fmt.Printf("cannot encode (%v, %v): ", kv.Key, kv.Value)
+			log.Printf("Error encoding (%v, %v): ", kv.Key, kv.Value)
 		}
 	}
+	file.Close()
+
+	err = os.Rename(file.Name(), filepath)
+	if err != nil {
+		log.Println("Error renaming temp file:", err)
+	}
+
 	return filepath
 }
 
-// Send Map result (Json file) path to the master
-func sendMapResults(path string, idxReduce int) MyReply {
-	args := MyArgs{}
-	args.MsgType = MsgMapOutput
-	args.MsgStr = path
-	args.MsgInt = idxReduce
 
-	reply := MyReply{}
-
-	ok := call("Coordinator.CallHandler", &args, &reply)
-	if !ok {
-		fmt.Println("error when sending Map results to the master")
+//
+// send an RPC request to the coordinator, wait for the response.
+// usually returns true.
+// returns false if something goes wrong.
+//
+func call(rpcname string, args interface{}, reply interface{}) bool {
+	// c, err := rpc.DialHTTP("tcp", "13.53.175.183"+":1234")
+	// c, err := rpc.DialHTTP("tcp", "localhost"+":1234")
+	sockname := coordinatorSock()
+	c, err := rpc.DialHTTP("unix", sockname)
+	if err != nil {
+		// fails to contact the coordinator
+		return false
 	}
-	return reply
+	defer c.Close()
+
+	err = c.Call(rpcname, args, reply)
+	if err != nil {
+		return false
+	}
+
+	return true
 }
 
-func CallTask() MyReply {
+// Call for a task
+func callTask() MyReply {
 	args := MyArgs{}
 	args.MsgType = MsgTask
 
@@ -236,12 +248,29 @@ func CallTask() MyReply {
 	// the CallHandler() method of struct Coordinator.
 	ok := call("Coordinator.CallHandler", &args, &reply)
 	if !ok {
-		return MyReply{TaskType: FinishTask}
+		return MyReply{TaskType: ExitTask}
 	}
 	return reply
 }
 
-func callTaskDone(taskType int, taskIdx int) MyReply {
+// Send Map result (Json file) path to the master
+func notifyMapResults(path string, idxReduce int) MyReply {
+	args := MyArgs{}
+	args.MsgType = MsgMapOutput
+	args.MsgStr = path
+	args.MsgInt = idxReduce
+
+	reply := MyReply{}
+
+	ok := call("Coordinator.CallHandler", &args, &reply)
+	if !ok {
+		log.Println("error when sending Map results to the master")
+	}
+	return reply
+}
+
+// notify finished task
+func notifyTaskDone(taskType int, taskIdx int) MyReply {
 	args := MyArgs{}
 	args.MsgType = taskType
 	args.MsgInt = taskIdx
@@ -249,7 +278,9 @@ func callTaskDone(taskType int, taskIdx int) MyReply {
 
 	ok := call("Coordinator.CallHandler", &args, &reply)
 	if !ok {
-		return MyReply{TaskType: FinishTask}
+		// if the worker fails to contact the coordinator
+		// it can assume that the coordinator has exited because the job is done
+		return MyReply{TaskType: ExitTask}
 	}
 	return reply
 }

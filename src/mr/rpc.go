@@ -49,7 +49,8 @@ const (
 const (
 	MapTask = iota
 	ReduceTask
-	FinishTask
+	NoTask  // all tasks have been allocated (but possible not finished), no more task to allocate
+	ExitTask	
 )
 
 
